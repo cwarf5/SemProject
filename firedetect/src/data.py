@@ -2,6 +2,7 @@ import os
 import numpy as np
 from PIL import Image
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from utils import get_dataset_statistics, validate_img_size
 
 class WildfireDataLoader:
     def __init__(self, data_dir, img_size=(224, 224), batch_size=32):
@@ -14,7 +15,7 @@ class WildfireDataLoader:
             batch_size (int): Batch size for training
         """
         self.data_dir = data_dir
-        self.img_size = img_size
+        self.img_size = validate_img_size(img_size)
         self.batch_size = batch_size
         self.train_dir = os.path.join(data_dir, 'train')
         self.val_dir = os.path.join(data_dir, 'validation')
@@ -90,48 +91,25 @@ class WildfireDataLoader:
             print(f"Error: Missing required directories in {self.data_dir}")
             return False
         
-        # Check training directories
-        train_fire_dir = os.path.join(self.train_dir, 'fire')
-        train_no_fire_dir = os.path.join(self.train_dir, 'no_fire')
-        
-        # Check validation directories
-        val_fire_dir = os.path.join(self.val_dir, 'fire')
-        val_no_fire_dir = os.path.join(self.val_dir, 'no_fire')
-        
-        # Check if all subdirectories exist
-        for dir_path in [train_fire_dir, train_no_fire_dir, val_fire_dir, val_no_fire_dir]:
-            if not os.path.exists(dir_path):
-                print(f"Error: Missing directory {dir_path}")
-                return False
-        
-        # Count images in training directories
-        train_fire_images = len([f for f in os.listdir(train_fire_dir) 
-                               if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        train_no_fire_images = len([f for f in os.listdir(train_no_fire_dir) 
-                                  if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        
-        # Count images in validation directories
-        val_fire_images = len([f for f in os.listdir(val_fire_dir) 
-                             if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        val_no_fire_images = len([f for f in os.listdir(val_no_fire_dir) 
-                                if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+        # Use get_dataset_statistics to check directories and count images
+        stats = get_dataset_statistics(self.data_dir)
         
         # Check if any directory is empty
-        if train_fire_images == 0 or train_no_fire_images == 0 or \
-           val_fire_images == 0 or val_no_fire_images == 0:
+        if stats['train_fire'] == 0 or stats['train_no_fire'] == 0 or \
+           stats['val_fire'] == 0 or stats['val_no_fire'] == 0:
             print(f"Error: Empty directories found")
-            print(f"Training fire images: {train_fire_images}")
-            print(f"Training no-fire images: {train_no_fire_images}")
-            print(f"Validation fire images: {val_fire_images}")
-            print(f"Validation no-fire images: {val_no_fire_images}")
+            print(f"Training fire images: {stats['train_fire']}")
+            print(f"Training no-fire images: {stats['train_no_fire']}")
+            print(f"Validation fire images: {stats['val_fire']}")
+            print(f"Validation no-fire images: {stats['val_no_fire']}")
             return False
         
         print("\nDataset Statistics:")
         print(f"Training:")
-        print(f"  - Fire images: {train_fire_images}")
-        print(f"  - No fire images: {train_no_fire_images}")
+        print(f"  - Fire images: {stats['train_fire']}")
+        print(f"  - No fire images: {stats['train_no_fire']}")
         print(f"Validation:")
-        print(f"  - Fire images: {val_fire_images}")
-        print(f"  - No fire images: {val_no_fire_images}")
+        print(f"  - Fire images: {stats['val_fire']}")
+        print(f"  - No fire images: {stats['val_no_fire']}")
         
-        return True 
+        return True

@@ -6,6 +6,14 @@ import cv2
 import numpy as np
 from flask import Flask, render_template, Response
 import os
+import configparser
+import random
+from tensorflow.keras.models import load_model
+from PIL import Image
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Conditionally import picamera2 modules if available
 try:
@@ -23,6 +31,9 @@ app = Flask(__name__)
 # Global variable to store detections
 detections = []
 
+# Global fire model
+fire_model = None
+
 # Global streaming output instance
 class StreamingOutput(io.BufferedIOBase):
     def __init__(self):
@@ -36,22 +47,84 @@ class StreamingOutput(io.BufferedIOBase):
 
 output = StreamingOutput()
 
-# Path to model and labels
-model_path = "/usr/share/hailo-models/yolov8s_h8l.hef"
-labels_path = "coco.txt"
-score_threshold = 0.5
+# Load configuration
+def load_config():
+    """Load configuration from config.ini file or create default"""
+    config = configparser.ConfigParser()
+    
+    # Default configuration
+    config['DEFAULT'] = {
+        'HailoModelPath': '/usr/share/hailo-models/yolov8s_h8l.hef',
+        'LabelsPath': 'coco.txt',
+        'FireModelPath': '../firedetect/models/best_model.h5',
+        'ScoreThreshold': '0.5',
+        'ImageWidth': '1280',
+        'ImageHeight': '960',
+        'FrameRate': '30'
+    }
+    
+    # Try to load from config file if it exists
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
+    if os.path.exists(config_path):
+        config.read(config_path)
+        logging.info(f"Loaded configuration from {config_path}")
+    else:
+        # Create default config file
+        with open(config_path, 'w') as f:
+            config.write(f)
+        logging.info(f"Created default configuration file at {config_path}")
+    
+    return config['DEFAULT']
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Load configuration
+config = load_config()
+hailo_model_path = config['HailoModelPath']
+labels_path = config['LabelsPath']
+fire_model_path = config['FireModelPath']
+score_threshold = float(config['ScoreThreshold'])
+img_width = int(config['ImageWidth'])
+img_height = int(config['ImageHeight'])
+frame_rate = int(config['FrameRate'])
+
+# Try to load the fire detection model directly
+try:
+    fire_model_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), fire_model_path))
+    if os.path.exists(fire_model_path):
+        # Use compile=False to avoid compatibility issues
+        fire_model = load_model(fire_model_path, compile=False)
+        logging.info(f"Loaded fire detection model from {fire_model_path}")
+    else:
+        logging.warning(f"Fire model not found at {fire_model_path}")
+except Exception as e:
+    logging.error(f"Error loading fire detection model: {e}")
+    fire_model = None
 
 # Load class names from the labels file
 try:
+    labels_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), labels_path)
     with open(labels_path, 'r', encoding="utf-8") as f:
         class_names = f.read().splitlines()
     logging.info(f"Loaded {len(class_names)} classes from {labels_path}")
 except FileNotFoundError:
-    class_names = ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat"]
+    class_names = ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "fire"]
     logging.warning(f"Labels file {labels_path} not found. Using default subset of classes.")
+
+def preprocess_image(image):
+    """Preprocess an image for the fire detection model."""
+    # Convert OpenCV BGR to RGB
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    # Resize to model input size
+    image_resized = cv2.resize(image, (224, 224))
+    
+    # Normalize pixel values
+    image_normalized = image_resized.astype('float32') / 255.0
+    
+    # Add batch dimension
+    image_batch = np.expand_dims(image_normalized, axis=0)
+    
+    return image_batch
 
 def extract_detections(hailo_output, w, h, class_names, threshold=0.5):
     """Extract detections from the HailoRT-postprocess output."""
@@ -65,6 +138,36 @@ def extract_detections(hailo_output, w, h, class_names, threshold=0.5):
                 results.append([class_names[class_id], bbox, score])
     return results
 
+def detect_fire_in_frame(frame):
+    """Detect fire in a frame using our fire detection model."""
+    global fire_model
+    
+    if fire_model is None:
+        return []
+    
+    try:
+        # Preprocess the image
+        processed_image = preprocess_image(frame)
+        
+        # Get prediction
+        prediction = fire_model.predict(processed_image, verbose=0)[0][0]
+        
+        # Check if fire detected based on threshold
+        if prediction >= score_threshold:
+            # Create a detection with the same format as other detections
+            h, w = frame.shape[:2]
+            x0, y0 = int(w * 0.25), int(h * 0.25)  # Approximated bounding box
+            x1, y1 = int(w * 0.75), int(h * 0.75)
+            
+            logging.info(f"Fire detected with confidence {prediction:.4f}")
+            return [["Fire", (x0, y0, x1, y1), float(prediction)]]
+        
+        return []
+    
+    except Exception as e:
+        logging.error(f"Error in fire detection: {e}")
+        return []
+
 def draw_objects(frame):
     """Draw bounding boxes around detected objects."""
     global detections
@@ -72,9 +175,15 @@ def draw_objects(frame):
         for class_name, bbox, score in detections:
             x0, y0, x1, y1 = bbox
             label = f"{class_name} %{int(score * 100)}"
-            cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 255, 0), 2)
+            color = (0, 255, 0)  # Green by default
+            
+            # Use red color for fire detections
+            if class_name.lower() == "fire":
+                color = (0, 0, 255)  # Red in BGR
+                
+            cv2.rectangle(frame, (x0, y0), (x1, y1), color, 2)
             cv2.putText(frame, label, (x0 + 5, y0 + 15),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
     return frame
 
 class SimulatedCamera:
@@ -113,6 +222,8 @@ class SimulatedCamera:
     
     def _generate_frames(self):
         """Generate frames for the output."""
+        global detections
+        
         while self.running:
             if self.use_webcam:
                 ret, frame = self.cap.read()
@@ -121,6 +232,16 @@ class SimulatedCamera:
                     time.sleep(1/self.fps)
                     continue
                 frame = cv2.resize(frame, (self.width, self.height))
+                
+                # Try to detect fire using our model if available
+                if fire_model is not None:
+                    fire_detections = detect_fire_in_frame(frame)
+                    if fire_detections:
+                        detections = fire_detections
+                    elif int(time.time()) % 7 == 0:
+                        # Clear detections occasionally
+                        detections = []
+                
             else:
                 # Create a simple colored frame with timestamp
                 frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
@@ -133,16 +254,23 @@ class SimulatedCamera:
                 
                 # Add simulated detection every few seconds
                 if int(time.time()) % 5 == 0:
-                    global detections
-                    # Simulate a detection
-                    class_id = np.random.randint(0, len(class_names))
-                    x0 = np.random.randint(100, self.width - 300)
-                    y0 = np.random.randint(100, self.height - 300)
-                    x1 = x0 + np.random.randint(100, 300)
-                    y1 = y0 + np.random.randint(100, 300)
-                    score = np.random.uniform(0.6, 0.95)
-                    
-                    detections = [[class_names[class_id], (x0, y0, x1, y1), score]]
+                    # If fire model available, add a fire detection occasionally
+                    if fire_model is not None and random.random() < 0.3:
+                        x0 = np.random.randint(100, self.width - 300)
+                        y0 = np.random.randint(100, self.height - 300)
+                        x1 = x0 + np.random.randint(100, 300)
+                        y1 = y0 + np.random.randint(100, 300)
+                        score = np.random.uniform(0.6, 0.95)
+                        detections = [["Fire", (x0, y0, x1, y1), score]]
+                    else:
+                        # Simulate other object detection
+                        class_id = np.random.randint(0, len(class_names))
+                        x0 = np.random.randint(100, self.width - 300)
+                        y0 = np.random.randint(100, self.height - 300)
+                        x1 = x0 + np.random.randint(100, 300)
+                        y1 = y0 + np.random.randint(100, 300)
+                        score = np.random.uniform(0.6, 0.95)
+                        detections = [[class_names[class_id], (x0, y0, x1, y1), score]]
                 elif int(time.time()) % 7 == 0:
                     # Clear detections occasionally
                     detections = []
@@ -167,18 +295,18 @@ class SimulatedCamera:
 # Initialize either real or simulated camera
 if PI_AVAILABLE:
     try:
-        logging.info(f"Initializing Hailo with model: {model_path}")
-        hailo = Hailo(model_path)
+        logging.info(f"Initializing Hailo with model: {hailo_model_path}")
+        hailo = Hailo(hailo_model_path)
         model_h, model_w, _ = hailo.get_input_shape()
         logging.info(f"Model input shape: {model_w}x{model_h}")
         
         # Create Picamera2 instance and configure streams
         picam2 = Picamera2()
-        main_size = (1280, 960)  # Main stream size
+        main_size = (img_width, img_height)  # Main stream size
         lores_size = (320, 240)  # Lo-res stream size
         main = {'size': main_size, 'format': 'XRGB8888'}
         lores = {'size': lores_size, 'format': 'RGB888'}
-        controls = {'FrameRate': 30}
+        controls = {'FrameRate': frame_rate}
 
         video_config = picam2.create_preview_configuration(main, lores=lores, controls=controls)
         picam2.configure(video_config)
@@ -207,6 +335,11 @@ if PI_AVAILABLE:
                         frame = cv2.resize(frame, (model_w, model_h))
                     results = hailo.run(frame)
                     detections = extract_detections(results, main_size[0], main_size[1], class_names, score_threshold)
+                    
+                    # Fire detection
+                    fire_detections = detect_fire_in_frame(frame)
+                    if fire_detections:
+                        detections.extend(fire_detections)
                 except Exception as e:
                     logging.error(f"Error in processing frame: {e}")
                     time.sleep(0.1)
@@ -230,7 +363,7 @@ if PI_AVAILABLE:
         
 if not PI_AVAILABLE:
     # Use simulated camera
-    camera = SimulatedCamera(width=1280, height=960, fps=30)
+    camera = SimulatedCamera(width=img_width, height=img_height, fps=frame_rate)
     camera.start()
     camera.start_recording(None, output)
 

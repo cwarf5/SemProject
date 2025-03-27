@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras import layers, models
 from tensorflow.keras.applications import MobileNetV2
+from utils import validate_img_size
 
 class WildfireDetectionModel:
     def __init__(self, img_size=(224, 224)):
@@ -10,7 +11,7 @@ class WildfireDetectionModel:
         Args:
             img_size (tuple): Input image size (height, width)
         """
-        self.img_size = img_size
+        self.img_size = validate_img_size(img_size)
         self.model = None
         
     def build_model(self, fine_tune=True):
@@ -100,4 +101,4 @@ class WildfireDetectionModel:
         """
         if self.model is None:
             return "No model built yet."
-        return self.model.summary() 
+        return self.model.summary()

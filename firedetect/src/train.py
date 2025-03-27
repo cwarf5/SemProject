@@ -5,6 +5,7 @@ from datetime import datetime
 from data import WildfireDataLoader
 from model import WildfireDetectionModel
 from visualize import WildfireVisualizer
+from utils import validate_img_size
 
 def setup_logging(log_dir):
     """Set up TensorBoard logging."""
@@ -31,10 +32,13 @@ def train_model(args):
     os.makedirs(os.path.join(args.data_dir, 'validation', 'fire'), exist_ok=True)
     os.makedirs(os.path.join(args.data_dir, 'validation', 'no_fire'), exist_ok=True)
     
+    # Validate and standardize image size
+    img_size = validate_img_size(args.img_size)
+    
     # Initialize data loader
     data_loader = WildfireDataLoader(
         data_dir=args.data_dir,
-        img_size=(args.img_size, args.img_size),
+        img_size=img_size,
         batch_size=args.batch_size
     )
     
@@ -161,4 +165,4 @@ def main():
     train_model(args)
 
 if __name__ == '__main__':
-    main() 
+    main()

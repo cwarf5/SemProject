@@ -6,6 +6,7 @@ from PIL import Image
 import tensorflow as tf
 from sklearn.metrics import confusion_matrix, classification_report
 import random
+from utils import get_dataset_statistics, count_images_in_directory
 
 class WildfireVisualizer:
     def __init__(self, data_dir=None, model=None, history=None):
@@ -28,47 +29,22 @@ class WildfireVisualizer:
         if not self.data_dir:
             raise ValueError("Data directory not provided")
             
-        # Define directory paths
-        train_fire_dir = os.path.join(self.data_dir, 'train', 'fire')
-        train_no_fire_dir = os.path.join(self.data_dir, 'train', 'no_fire')
-        val_fire_dir = os.path.join(self.data_dir, 'validation', 'fire')
-        val_no_fire_dir = os.path.join(self.data_dir, 'validation', 'no_fire')
-        
-        # Initialize counts
-        train_fire_count = 0
-        train_no_fire_count = 0
-        val_fire_count = 0
-        val_no_fire_count = 0
-        
-        # Count training images if directories exist
-        if os.path.exists(train_fire_dir):
-            train_fire_count = len([f for f in os.listdir(train_fire_dir)
-                                  if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        if os.path.exists(train_no_fire_dir):
-            train_no_fire_count = len([f for f in os.listdir(train_no_fire_dir)
-                                     if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        
-        # Count validation images if directories exist
-        if os.path.exists(val_fire_dir):
-            val_fire_count = len([f for f in os.listdir(val_fire_dir)
-                                if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        if os.path.exists(val_no_fire_dir):
-            val_no_fire_count = len([f for f in os.listdir(val_no_fire_dir)
-                                   if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+        # Use utility function to get statistics
+        stats = get_dataset_statistics(self.data_dir)
         
         # Print statistics
         print("\nDataset Statistics:")
         print(f"Training:")
-        print(f"  - Fire images: {train_fire_count}")
-        print(f"  - No fire images: {train_no_fire_count}")
+        print(f"  - Fire images: {stats['train_fire']}")
+        print(f"  - No fire images: {stats['train_no_fire']}")
         print(f"Validation:")
-        print(f"  - Fire images: {val_fire_count}")
-        print(f"  - No fire images: {val_no_fire_count}")
+        print(f"  - Fire images: {stats['val_fire']}")
+        print(f"  - No fire images: {stats['val_no_fire']}")
         
         # Create grouped bar plot
         labels = ['Fire', 'No Fire']
-        train_counts = [train_fire_count, train_no_fire_count]
-        val_counts = [val_fire_count, val_no_fire_count]
+        train_counts = [stats['train_fire'], stats['train_no_fire']]
+        val_counts = [stats['val_fire'], stats['val_no_fire']]
         
         x = np.arange(len(labels))
         width = 0.35
@@ -237,4 +213,4 @@ class WildfireVisualizer:
         
         if save_path:
             with open(save_path, 'w') as f:
-                f.write(report) 
+                f.write(report)

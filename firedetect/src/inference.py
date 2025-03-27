@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 from data import WildfireDataLoader
 from model import WildfireDetectionModel
+from utils import validate_img_size
 
 class WildfirePredictor:
     def __init__(self, model_path, img_size=(224, 224)):
@@ -13,10 +14,10 @@ class WildfirePredictor:
             model_path (str): Path to the saved model
             img_size (tuple): Input image size (height, width)
         """
-        self.img_size = img_size
-        self.model = WildfireDetectionModel(img_size=img_size)
+        self.img_size = validate_img_size(img_size)
+        self.model = WildfireDetectionModel(img_size=self.img_size)
         self.model.load_model(model_path)
-        self.data_loader = WildfireDataLoader(data_dir="", img_size=img_size)
+        self.data_loader = WildfireDataLoader(data_dir="", img_size=self.img_size)
     
     def predict_image(self, image_path, threshold=0.5):
         """
@@ -77,4 +78,4 @@ def main():
         print(f"Error during prediction: {str(e)}")
 
 if __name__ == '__main__':
-    main() 
+    main()

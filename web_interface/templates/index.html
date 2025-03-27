@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security Camera Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <h1>FirePatrol</h1>
+    </div>
+    <nav>
+      <ul>
+        <li class="active"><a href="#">My cameras</a></li>
+        <li><a href="#">Shared with me</a></li>
+        <li><a href="#">Settings</a></li>
+      </ul>
+    </nav>
+    <div class="connect-btn">
+      <button>Connect device</button>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="search-bar">
+      <i class="fas fa-search"></i>
+      <input type="text" placeholder="Search cameras">
+    </div>
+    <div class="view-options">
+      <button class="view-btn">View <i class="fas fa-chevron-down"></i></button>
+      <button class="filter-btn">Filter <i class="fas fa-chevron-down"></i></button>
+    </div>
+  </div>
+
+  <div class="camera-grid">
+    <div class="camera-card">
+      <div class="camera-feed">
+        <div class="rec-indicator">REC</div>
+        <img src="{{ url_for('video_feed') }}" alt="Camera Feed">
+        <div class="camera-label">Living Room</div>
+      </div>
+      <div class="camera-controls">
+        <button class="control-btn expand-btn" data-camera="Living Room"><i class="fas fa-expand"></i></button>
+      </div>
+    </div>
+    
+    <div class="camera-card">
+      <div class="camera-feed">
+        <div class="rec-indicator">REC</div>
+        <img src="{{ url_for('video_feed') }}" alt="Camera Feed">
+        <div class="camera-label">Front Door</div>
+      </div>
+      <div class="camera-controls">
+        <button class="control-btn expand-btn" data-camera="Front Door"><i class="fas fa-expand"></i></button>
+      </div>
+    </div>
+    
+    <div class="camera-card">
+      <div class="camera-feed">
+        <div class="rec-indicator">REC</div>
+        <img src="{{ url_for('video_feed') }}" alt="Camera Feed">
+        <div class="camera-label">Backyard</div>
+      </div>
+      <div class="camera-controls">
+        <button class="control-btn expand-btn" data-camera="Backyard"><i class="fas fa-expand"></i></button>
+      </div>
+    </div>
+    
+    <div class="camera-card">
+      <div class="camera-feed">
+        <div class="rec-indicator">REC</div>
+        <img src="{{ url_for('video_feed') }}" alt="Camera Feed">
+        <div class="camera-label">Garage</div>
+      </div>
+      <div class="camera-controls">
+        <button class="control-btn expand-btn" data-camera="Garage"><i class="fas fa-expand"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Modal -->
+  <div id="fullscreen-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modal-camera-name">Camera Name</h2>
+        <button class="close-modal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="fullscreen-feed">
+          <div class="rec-indicator">REC</div>
+          <img id="fullscreen-feed" src="{{ url_for('video_feed') }}" alt="Fullscreen Camera Feed">
+        </div>
+        <div class="fullscreen-controls">
+          <div class="control-group">
+            <button class="fs-control-btn"><i class="fas fa-play"></i></button>
+            <button class="fs-control-btn"><i class="fas fa-pause"></i></button>
+            <button class="fs-control-btn"><i class="fas fa-stop"></i></button>
+          </div>
+          <div class="control-group">
+            <button class="fs-control-btn"><i class="fas fa-volume-up"></i></button>
+            <button class="fs-control-btn"><i class="fas fa-download"></i></button>
+            <button class="fs-control-btn"><i class="fas fa-cog"></i></button>
+          </div>
+        </div>
+        <div class="camera-info">
+          <div class="info-item">
+            <span class="info-label">Status:</span>
+            <span class="info-value">Recording</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Resolution:</span>
+            <span class="info-value">1280x720</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">FPS:</span>
+            <span class="info-value">30</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Last Motion:</span>
+            <span class="info-value" id="last-motion-time">2 minutes ago</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-item">
+      <i class="fas fa-server"></i>
+      <span>System: Online</span>
+    </div>
+    <div class="status-item">
+      <i class="fas fa-hdd"></i>
+      <span>Storage: 1.2TB/2TB</span>
+    </div>
+    <div class="status-item">
+      <i class="fas fa-video"></i>
+      <span>Cameras: 4/4 Online</span>
+    </div>
+    <div class="status-item">
+      <i class="fas fa-clock"></i>
+      <span id="current-time">00:00:00</span>
+    </div>
+  </div>
+
+  <footer>
+    <p>Powered by Hailo AI Accelerator</p>
+  </footer>
+
+  <script>
+    // Update the current time
+    function updateTime() {
+      const now = new Date();
+      const timeString = now.toLocaleTimeString();
+      document.getElementById('current-time').textContent = timeString;
+    }
+    
+    // Update time every second
+    setInterval(updateTime, 1000);
+    updateTime(); // Initial call
+
+    // Expand button functionality
+    document.addEventListener('DOMContentLoaded', function() {
+      const modal = document.getElementById('fullscreen-modal');
+      const modalCameraName = document.getElementById('modal-camera-name');
+      const lastMotionTime = document.getElementById('last-motion-time');
+      
+      // Add click event to all expand buttons
+      const expandButtons = document.querySelectorAll('.expand-btn');
+      expandButtons.forEach(button => {
+        button.addEventListener('click', function() {
+          const cameraName = this.getAttribute('data-camera');
+          modalCameraName.textContent = cameraName;
+          modal.classList.add('show');
+          document.body.style.overflow = 'hidden'; // Prevent scrolling when modal is open
+          
+          // Simulate random last motion time
+          const minutes = Math.floor(Math.random() * 10) + 1;
+          lastMotionTime.textContent = `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+        });
+      });
+      
+      // Close modal when clicking the close button
+      const closeButton = document.querySelector('.close-modal');
+      closeButton.addEventListener('click', function() {
+        modal.classList.remove('show');
+        document.body.style.overflow = 'auto'; // Re-enable scrolling
+      });
+      
+      // Close modal when clicking outside the modal content
+      modal.addEventListener('click', function(event) {
+        if (event.target === modal) {
+          modal.classList.remove('show');
+          document.body.style.overflow = 'auto';
+        }
+      });
+      
+      // Close modal with Escape key
+      document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape' && modal.classList.contains('show')) {
+          modal.classList.remove('show');
+          document.body.style.overflow = 'auto';
+        }
+      });
+      
+      // Fullscreen control buttons functionality
+      const playButton = document.querySelector('.fs-control-btn:nth-child(1)');
+      const pauseButton = document.querySelector('.fs-control-btn:nth-child(2)');
+      const stopButton = document.querySelector('.fs-control-btn:nth-child(3)');
+      const volumeButton = document.querySelector('.control-group:nth-child(2) .fs-control-btn:nth-child(1)');
+      const downloadButton = document.querySelector('.control-group:nth-child(2) .fs-control-btn:nth-child(2)');
+      const settingsButton = document.querySelector('.control-group:nth-child(2) .fs-control-btn:nth-child(3)');
+      
+      // Play button
+      playButton.addEventListener('click', function() {
+        alert('Play functionality would start the video stream');
+        // In a real implementation, this would control the video stream
+      });
+      
+      // Pause button
+      pauseButton.addEventListener('click', function() {
+        alert('Pause functionality would pause the video stream');
+        // In a real implementation, this would control the video stream
+      });
+      
+      // Stop button
+      stopButton.addEventListener('click', function() {
+        alert('Stop functionality would stop the video stream');
+        // In a real implementation, this would control the video stream
+      });
+      
+      // Volume button
+      volumeButton.addEventListener('click', function() {
+        this.querySelector('i').classList.toggle('fa-volume-up');
+        this.querySelector('i').classList.toggle('fa-volume-mute');
+        alert('Volume functionality would toggle audio');
+        // In a real implementation, this would toggle audio
+      });
+      
+      // Download button
+      downloadButton.addEventListener('click', function() {
+        alert('Download functionality would save a snapshot or recording');
+        // In a real implementation, this would save a snapshot or recording
+      });
+      
+      // Settings button
+      settingsButton.addEventListener('click', function() {
+        alert('Settings functionality would show camera configuration options');
+        // In a real implementation, this would show camera configuration options
+      });
+    });
+  </script>
+</body>
+</html>

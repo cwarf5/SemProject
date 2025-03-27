@@ -8,6 +8,7 @@ from flask import Flask, render_template, Response
 import os
 import configparser
 import random
+import subprocess
 from tensorflow.keras.models import load_model
 from PIL import Image
 
@@ -15,16 +16,89 @@ from PIL import Image
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Conditionally import picamera2 modules if available
+# Check for Raspberry Pi hardware
+IS_RASPBERRY_PI = False
 try:
-    from picamera2 import Picamera2, MappedArray
-    from picamera2.encoders import JpegEncoder
-    from picamera2.outputs import FileOutput
-    from picamera2.devices import Hailo
-    PI_AVAILABLE = True
+    with open('/proc/device-tree/model', 'r') as f:
+        if 'Raspberry Pi' in f.read():
+            IS_RASPBERRY_PI = True
+            logging.info("Running on Raspberry Pi hardware")
+except:
+    logging.info("Not running on Raspberry Pi hardware")
+
+# Detect available cameras
+def get_available_cameras():
+    """Detect available cameras on Raspberry Pi."""
+    try:
+        if IS_RASPBERRY_PI:
+            # Check if Pi Camera is connected using v4l2-ctl
+            result = subprocess.run(['v4l2-ctl', '--list-devices'], 
+                                   stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE,
+                                   text=True)
+            
+            cams = {}
+            if 'mmal' in result.stdout or 'bcm2835' in result.stdout or 'Raspberry Pi Camera' in result.stdout:
+                cams['picamera'] = True
+                logging.info("Raspberry Pi Camera module detected")
+            else:
+                cams['picamera'] = False
+                logging.info("No Raspberry Pi Camera module detected")
+                
+            # Check for USB webcams
+            devices = []
+            for i in range(10):  # Check first 10 indexes
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        devices.append(i)
+                    cap.release()
+            
+            if devices:
+                cams['webcam'] = True
+                cams['webcam_indices'] = devices
+                logging.info(f"USB webcams detected at indices: {devices}")
+            else:
+                cams['webcam'] = False
+                logging.info("No USB webcams detected")
+            
+            return cams
+        else:
+            # Non-Raspberry Pi device, just check standard webcam
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    return {'webcam': True, 'webcam_indices': [0]}
+                    
+            return {'webcam': False}
+    except Exception as e:
+        logging.error(f"Error detecting cameras: {e}")
+        return {'webcam': False, 'picamera': False}
+
+# Conditionally import picamera2 modules if available
+PICAMERA_AVAILABLE = False
+try:
+    if IS_RASPBERRY_PI:
+        from picamera2 import Picamera2, MappedArray
+        from picamera2.encoders import JpegEncoder
+        from picamera2.outputs import FileOutput
+        PICAMERA_AVAILABLE = True
+        logging.info("Successfully imported picamera2 modules")
+except ImportError as e:
+    logging.warning(f"Failed to import picamera2 modules: {e}")
+    
+# Try to import Hailo if we're on a Pi
+HAILO_AVAILABLE = False
+try:
+    if IS_RASPBERRY_PI and PICAMERA_AVAILABLE:
+        from picamera2.devices import Hailo
+        HAILO_AVAILABLE = True
+        logging.info("Successfully imported Hailo module")
 except ImportError:
-    PI_AVAILABLE = False
-    logging.warning("Pi camera modules not available - running in simulation mode")
+    logging.warning("Hailo module not available")
 
 app = Flask(__name__)
 
@@ -186,6 +260,172 @@ def draw_objects(frame):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
     return frame
 
+class RaspberryPiCamera:
+    """Camera implementation for Raspberry Pi."""
+    def __init__(self, width=1280, height=960, fps=30):
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.running = False
+        self.encoder = None
+        self.output = None
+        
+        # Check all possible camera indices
+        self.camera_index = None
+        self.cap = None
+        available_cameras = get_available_cameras()
+        
+        # Try to find a working camera
+        if available_cameras.get('webcam', False) and 'webcam_indices' in available_cameras:
+            for idx in available_cameras['webcam_indices']:
+                try:
+                    cap = cv2.VideoCapture(idx)
+                    if cap.isOpened():
+                        ret, test_frame = cap.read()
+                        if ret:
+                            self.camera_index = idx
+                            self.cap = cap
+                            logging.info(f"Successfully opened camera at index {idx}")
+                            break
+                        cap.release()
+                except Exception as e:
+                    logging.error(f"Error testing camera at index {idx}: {e}")
+        
+        if self.camera_index is not None:
+            logging.info(f"Using camera at index {self.camera_index} for Pi")
+        else:
+            logging.warning("No working camera found on Raspberry Pi")
+    
+    def start(self):
+        self.running = True
+        logging.info("Raspberry Pi camera started")
+    
+    def start_recording(self, encoder, output):
+        self.encoder = encoder
+        self.output = output
+        # Start a thread that produces frames
+        thread = threading.Thread(target=self._generate_frames, daemon=True)
+        thread.start()
+        logging.info("Raspberry Pi camera recording started")
+    
+    def _generate_frames(self):
+        """Generate frames for the output."""
+        global detections
+        
+        # If we couldn't initialize a camera, use simulated frames
+        if self.cap is None or not self.cap.isOpened():
+            self._generate_simulated_frames()
+            return
+        
+        while self.running:
+            try:
+                ret, frame = self.cap.read()
+                if not ret:
+                    logging.warning(f"Failed to get frame from camera {self.camera_index}")
+                    # Try to recover by reopening the camera
+                    self.cap.release()
+                    self.cap = cv2.VideoCapture(self.camera_index)
+                    time.sleep(0.5)
+                    continue
+                
+                # Resize the frame
+                frame = cv2.resize(frame, (self.width, self.height))
+                
+                # Try to detect fire using our model if available
+                if fire_model is not None:
+                    fire_detections = detect_fire_in_frame(frame)
+                    if fire_detections:
+                        detections = fire_detections
+                    elif int(time.time()) % 7 == 0:
+                        # Clear detections occasionally
+                        detections = []
+                
+                # Draw objects on the frame
+                frame = draw_objects(frame)
+                
+                # Convert to JPEG
+                ret, jpeg = cv2.imencode('.jpg', frame)
+                if ret:
+                    self.output.write(jpeg.tobytes())
+                
+                # Frame rate control
+                time.sleep(1/self.fps)
+                
+            except Exception as e:
+                logging.error(f"Error in Raspberry Pi camera frame generation: {e}")
+                time.sleep(0.5)
+    
+    def _generate_simulated_frames(self):
+        """Generate simulated frames when no camera is available."""
+        global detections
+        
+        while self.running:
+            try:
+                # Create a simple colored frame with timestamp
+                frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                frame[:, :, :] = [64, 64, 64]  # Dark gray background
+                
+                # Add explicit message that no camera was found
+                cv2.putText(frame, "No camera found", (self.width // 4, self.height // 2 - 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                
+                # Add timestamp
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                cv2.putText(frame, timestamp, (50, 50), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                
+                # Add simulated detection every few seconds
+                if int(time.time()) % 5 == 0:
+                    # If fire model available, add a fire detection occasionally
+                    if fire_model is not None and random.random() < 0.3:
+                        x0 = np.random.randint(100, self.width - 300)
+                        y0 = np.random.randint(100, self.height - 300)
+                        x1 = x0 + np.random.randint(100, 300)
+                        y1 = y0 + np.random.randint(100, 300)
+                        score = np.random.uniform(0.6, 0.95)
+                        detections = [["Fire", (x0, y0, x1, y1), score]]
+                        
+                        # Add text indicating this is a simulated detection
+                        cv2.putText(frame, "SIMULATION ONLY", (self.width // 4, self.height // 2), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    else:
+                        # Simulate other object detection
+                        class_id = np.random.randint(0, len(class_names))
+                        x0 = np.random.randint(100, self.width - 300)
+                        y0 = np.random.randint(100, self.height - 300)
+                        x1 = x0 + np.random.randint(100, 300)
+                        y1 = y0 + np.random.randint(100, 300)
+                        score = np.random.uniform(0.6, 0.95)
+                        detections = [[class_names[class_id], (x0, y0, x1, y1), score]]
+                        
+                        # Add text indicating this is a simulated detection
+                        cv2.putText(frame, "SIMULATION ONLY", (self.width // 4, self.height // 2), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                elif int(time.time()) % 7 == 0:
+                    # Clear detections occasionally
+                    detections = []
+                
+                # Draw objects on the frame
+                frame = draw_objects(frame)
+                
+                # Convert to JPEG
+                ret, jpeg = cv2.imencode('.jpg', frame)
+                if ret:
+                    self.output.write(jpeg.tobytes())
+                
+                # Frame rate control
+                time.sleep(1/self.fps)
+                
+            except Exception as e:
+                logging.error(f"Error in simulated frame generation: {e}")
+                time.sleep(0.5)
+    
+    def stop_recording(self):
+        self.running = False
+        if self.cap is not None and self.cap.isOpened():
+            self.cap.release()
+        logging.info("Raspberry Pi camera recording stopped")
+
 class SimulatedCamera:
     """Simulated camera class for use when Pi camera is not available."""
     def __init__(self, width=1280, height=960, fps=30):
@@ -293,7 +533,8 @@ class SimulatedCamera:
         logging.info("Simulated recording stopped")
 
 # Initialize either real or simulated camera
-if PI_AVAILABLE:
+available_cameras = get_available_cameras()
+if IS_RASPBERRY_PI and PICAMERA_AVAILABLE and available_cameras.get('picamera', False):
     try:
         logging.info(f"Initializing Hailo with model: {hailo_model_path}")
         hailo = Hailo(hailo_model_path)
@@ -359,11 +600,14 @@ if PI_AVAILABLE:
         
     except Exception as e:
         logging.error(f"Failed to initialize Pi camera: {e}")
-        PI_AVAILABLE = False
+        PICAMERA_AVAILABLE = False
         
-if not PI_AVAILABLE:
-    # Use simulated camera
-    camera = SimulatedCamera(width=img_width, height=img_height, fps=frame_rate)
+if not PICAMERA_AVAILABLE or not available_cameras.get('picamera', False):
+    # Use Raspberry Pi camera class if available
+    if IS_RASPBERRY_PI:
+        camera = RaspberryPiCamera(width=img_width, height=img_height, fps=frame_rate)
+    else:
+        camera = SimulatedCamera(width=img_width, height=img_height, fps=frame_rate)
     camera.start()
     camera.start_recording(None, output)
 
@@ -396,7 +640,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         logging.info("Application shutting down")
     finally:
-        if PI_AVAILABLE and 'hailo' in locals():
+        if IS_RASPBERRY_PI and PICAMERA_AVAILABLE and 'hailo' in locals():
             hailo.close()
-        elif not PI_AVAILABLE and 'camera' in locals():
+        elif not PICAMERA_AVAILABLE and 'camera' in locals():
             camera.stop_recording()

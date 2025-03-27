@@ -63,6 +63,46 @@ web_interface/
 └── templates/        # HTML templates for web interface
 ```
 
+### Component Descriptions
+
+1. **Data Module (`data.py`)**:
+   - Handles dataset loading and preprocessing
+   - Implements data augmentation for training
+   - Manages training/validation data splits
+
+2. **Model Module (`model.py`)**:
+   - Defines the MobileNetV2-based neural network architecture
+   - Configures transfer learning layers
+   - Sets up model compilation with appropriate loss and metrics
+
+3. **Training Pipeline (`train.py`)**:
+   - Orchestrates the training process
+   - Implements early stopping and model checkpointing
+   - Saves trained models to disk
+
+4. **Visualization Module (`visualize.py`)**:
+   - Generates performance visualizations
+   - Creates confusion matrices and evaluation reports
+   - Produces dataset distribution plots
+
+5. **Inference Module (`inference.py`)**:
+   - Loads trained models
+   - Performs prediction on new images
+   - Processes results for interpretation
+
+6. **Web Interface (`app.py`)**:
+   - Provides browser-based UI for the system
+   - Handles camera feed integration
+   - Displays real-time detection results
+
+### Data Flow
+
+1. Training data flows from the Data Module to the Training Pipeline
+2. The Model Module provides the architecture used by the Training Pipeline
+3. The Training Pipeline generates artifacts for the Visualization Module
+4. The Inference Module uses the trained model for predictions
+5. The Web Interface uses the Inference Module for real-time detection on camera feeds
+
 ## Usage
 
 ### Data Preparation

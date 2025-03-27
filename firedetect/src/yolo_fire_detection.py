@@ -72,22 +72,27 @@ def create_data_yaml(root_folder, output_path="data.yaml"):
         Path to the created YAML file
     """
     try:
-        train_path = os.path.join(root_folder, 'train')
-        val_path = os.path.join(root_folder, 'validation')
+        # Make sure the paths exist
+        train_images = os.path.join(root_folder, 'train', 'images')
+        train_labels = os.path.join(root_folder, 'train', 'labels')
+        val_images = os.path.join(root_folder, 'validation', 'images')
+        val_labels = os.path.join(root_folder, 'validation', 'labels')
         
-        if not os.path.exists(train_path) or not os.path.exists(val_path):
-            logger.error(f"Train or validation folders not found in {root_folder}")
-            return None
+        for path in [train_images, train_labels, val_images, val_labels]:
+            if not os.path.exists(path):
+                logger.error(f"Required path not found: {path}")
+                return None
             
         # Define class names
         class_names = ['fire', 'no_fire']
         
-        # Create YAML content
+        # Create YAML content - properly format paths for YOLOv8
         yaml_content = f"""
 # Dataset path
 path: {root_folder}
-train: train
-val: validation
+train: train/images
+val: validation/images
+test: # No test split
 
 # Classes
 names:
@@ -109,9 +114,9 @@ names:
 def convert_dataset_to_yolo_format(root_folder, output_folder):
     """
     Convert the existing dataset to YOLOv8 format.
-    YOLOv8 expects images in a folder and labels in a separate folder.
+    YOLOv8 expects images in an 'images' folder and labels in a 'labels' folder.
     Each label is a text file with the same name as the image,
-    containing bounding box coordinates.
+    containing bounding box coordinates in normalized format.
     
     Args:
         root_folder: Root folder containing train and validation directories
@@ -122,44 +127,61 @@ def convert_dataset_to_yolo_format(root_folder, output_folder):
     """
     try:
         for split in ['train', 'validation']:
-            for class_name in ['fire', 'no_fire']:
-                # Source folder
-                src_folder = os.path.join(root_folder, split, class_name)
-                
-                # Create output folders
-                images_folder = os.path.join(output_folder, split, 'images')
-                labels_folder = os.path.join(output_folder, split, 'labels')
-                os.makedirs(images_folder, exist_ok=True)
-                os.makedirs(labels_folder, exist_ok=True)
-                
-                # Process each image in the folder
-                if os.path.exists(src_folder):
-                    for img_file in os.listdir(src_folder):
-                        if img_file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                            # Copy image to images folder
-                            src_path = os.path.join(src_folder, img_file)
-                            dst_path = os.path.join(images_folder, img_file)
+            # Create output folders for this split
+            images_folder = os.path.join(output_folder, split, 'images')
+            labels_folder = os.path.join(output_folder, split, 'labels')
+            os.makedirs(images_folder, exist_ok=True)
+            os.makedirs(labels_folder, exist_ok=True)
+            
+            # Process fire class images
+            fire_folder = os.path.join(root_folder, split, 'fire')
+            if os.path.exists(fire_folder):
+                for img_file in os.listdir(fire_folder):
+                    if img_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        # Copy image to images folder
+                        src_path = os.path.join(fire_folder, img_file)
+                        dst_path = os.path.join(images_folder, img_file)
+                        
+                        try:
                             img = cv2.imread(src_path)
                             if img is not None:
                                 cv2.imwrite(dst_path, img)
+                                logger.info(f"Copied fire image: {dst_path}")
                                 
-                                # Create label file (assuming the whole image contains the class)
+                                # Create label file for fire class (class 0)
                                 label_file = os.path.splitext(img_file)[0] + '.txt'
                                 label_path = os.path.join(labels_folder, label_file)
                                 
-                                # For fire class, create a bounding box covering the image
-                                if class_name == 'fire':
-                                    h, w = img.shape[:2]
-                                    # Format: class_id center_x center_y width height (normalized)
-                                    # For fire class, use class_id 0
-                                    with open(label_path, 'w') as f:
-                                        f.write(f"0 0.5 0.5 1.0 1.0\n")  # Full image bbox
-                                else:
-                                    # For no_fire class, create an empty label file or skip
-                                    # depending on your needs
-                                    # If you want to include no_fire as a class, use class_id 1
-                                    with open(label_path, 'w') as f:
-                                        f.write(f"1 0.5 0.5 1.0 1.0\n")  # Full image bbox
+                                # Format: class_id center_x center_y width height (normalized)
+                                with open(label_path, 'w') as f:
+                                    f.write("0 0.5 0.5 1.0 1.0\n")  # Full image bbox for class 0 (fire)
+                        except Exception as e:
+                            logger.error(f"Error processing fire image {src_path}: {e}")
+            
+            # Process no_fire class images
+            no_fire_folder = os.path.join(root_folder, split, 'no_fire')
+            if os.path.exists(no_fire_folder):
+                for img_file in os.listdir(no_fire_folder):
+                    if img_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        # Copy image to images folder
+                        src_path = os.path.join(no_fire_folder, img_file)
+                        dst_path = os.path.join(images_folder, img_file)
+                        
+                        try:
+                            img = cv2.imread(src_path)
+                            if img is not None:
+                                cv2.imwrite(dst_path, img)
+                                logger.info(f"Copied no_fire image: {dst_path}")
+                                
+                                # Create label file for no_fire class (class 1)
+                                label_file = os.path.splitext(img_file)[0] + '.txt'
+                                label_path = os.path.join(labels_folder, label_file)
+                                
+                                # Format: class_id center_x center_y width height (normalized)
+                                with open(label_path, 'w') as f:
+                                    f.write("1 0.5 0.5 1.0 1.0\n")  # Full image bbox for class 1 (no_fire)
+                        except Exception as e:
+                            logger.error(f"Error processing no_fire image {src_path}: {e}")
         
         logger.info(f"Dataset converted to YOLOv8 format at {output_folder}")
         return output_folder
@@ -216,12 +238,12 @@ def test_yolo_model(model_path, test_folder, output_folder="results"):
 
 def main():
     """Main function to run the YOLOv8 training and testing pipeline."""
-    # Define paths
-    root_folder = os.path.abspath("../firedetect/data")
-    yolo_dataset_folder = os.path.abspath("../firedetect/data_yolo")
-    data_yaml_path = os.path.abspath("../firedetect/data.yaml")
-    test_folder = os.path.abspath("../firedetect/test")
-    output_folder = os.path.abspath("../firedetect/results")
+    # Define paths - fix the path structure to avoid nested directories
+    root_folder = os.path.abspath("../data")
+    yolo_dataset_folder = os.path.abspath("../data_yolo")
+    data_yaml_path = os.path.abspath("../data.yaml")
+    test_folder = os.path.abspath("../test")
+    output_folder = os.path.abspath("../results")
     
     # Convert dataset to YOLOv8 format
     logger.info("Converting dataset to YOLOv8 format...")
@@ -241,7 +263,7 @@ def main():
         test_yolo_model(model_path, test_folder, output_folder)
         
         # Copy the model to models folder
-        models_folder = os.path.abspath("../firedetect/models")
+        models_folder = os.path.abspath("../models")
         os.makedirs(models_folder, exist_ok=True)
         yolo_model_path = os.path.join(models_folder, "yolov8_fire_detection.pt")
         import shutil

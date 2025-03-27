@@ -1,9 +1,9 @@
-# Version 1.0.0 - Base Model with Data Verification
+# Version 1.0.0 - Base Model with Web Interface Integration
 
 ## Key Features
 
 - **Separate Training/Validation Structure**: Implemented distinct directories for training and validation datasets
-- **Data Verification System**: Added interactive tool for dataset cleaning and verification
+- **Web Interface for Camera Streaming**: Added web application for real-time fire detection via camera
 - **Enhanced Visualizations**:
   - Grouped bar plots showing distribution across both training and validation sets
   - Sample image grid from training data
@@ -24,6 +24,7 @@ data/
 ## Technical Improvements
 
 - Removed automatic validation split from ImageDataGenerator in favor of explicit validation directory
+- Added web interface with camera streaming capabilities for real-time detection
 - Added error handling for missing directories and empty datasets
 - Implemented non-interactive matplotlib backend support for headless environments
 - Added statistics printing for both training and validation sets
@@ -38,7 +39,7 @@ data/
 ## Current State
 
 - Model is trained and validated on the provided dataset
-- Data verification tool is implemented but not extensively used
+- Web interface implemented for camera-based detection
 - Visualizations are functional but could be improved
 - Dataset size is small, limiting potential for advanced model performance
 - Will be creating a new branch for expanded dataset training

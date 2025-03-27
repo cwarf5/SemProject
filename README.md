@@ -4,12 +4,12 @@ An AI-powered system for detecting wildfires in images and video streams using d
 
 ## Project Overview
 
-This system uses computer vision and deep learning to detect the pr
-esence of wildfires in images and video streams. The project is implemented in three phases:
+This system uses computer vision and deep learning to detect the presence of wildfires in images and video streams. The project is implemented in three phases:
 
 1. **Phase 1:** Core AI/ML model for image-based fire detection
 2. **Phase 2:** Real-time webcam integration
-3. **Phase 3:** Raspberry Pi deployment (planned)
+3. **Phase 3:** Raspberry Pi deployment
+4. **Phase 4:** Web Interface Integration
 
 ## Features
 
@@ -51,32 +51,27 @@ firedetect/
 │   ├── model.py          # Neural network model definition
 │   ├── train.py          # Training script
 │   ├── inference.py      # Inference module
-│   ├── webcam.py         # Webcam integration (Phase 2)
-│   ├── visualize.py      # Visualization tools
-│   └── data_verification.py  # Dataset cleaning tools
+│   └── visualize.py      # Visualization tools
 ├── models/           # Saved model files
-├── logs/            # Training and inference logs
-├── visualizations/  # Generated plots and visualizations
+├── logs/             # Training and inference logs
+├── visualizations/   # Generated plots and visualizations
 ├── requirements.txt
 └── README.md
+web_interface/
+├── app.py            # Web application for camera streaming and detection
+├── static/           # Static files for web interface
+└── templates/        # HTML templates for web interface
 ```
 
 ## Usage
 
-### Data Preparation and Verification
+### Data Preparation
 
-Before training, it's recommended to verify and clean your dataset:
+For proper training, organize your dataset:
+- Place fire images in `data/fire/`
+- Place non-fire images in `data/no_fire/`
 
-```bash
-python src/data_verification.py --data_dir data/
-```
-
-This interactive tool allows you to:
-- View each image in the dataset
-- Correct misclassified images
-- Move uncertain cases to a review folder
-- Delete problematic images
-- Generate dataset statistics
+Ensure your dataset is properly categorized and labeled before proceeding with training.
 
 ### Training the Model
 
@@ -110,9 +105,17 @@ python src/inference.py --model_path models/best_model.h5 --image_path path/to/i
 
 ### Real-time Webcam Detection
 
+To use the web interface for real-time wildfire detection:
+
 ```bash
-python src/webcam.py --model_path models/best_model.h5
+cd web_interface
+python app.py
 ```
+
+This will start a web server that provides:
+- Real-time camera streaming
+- Fire detection on camera feed
+- Visual alerts when fire is detected
 
 ## Model Architecture
 
@@ -137,7 +140,6 @@ The model is evaluated on:
 - Place non-fire (normal forest) images in `data/no_fire/`
 - Supported formats: JPG, PNG
 - Recommended minimum dataset size: 1000 images per class
-- Use the data verification tool to ensure correct labeling
 
 ## Contributing
 
@@ -153,4 +155,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Implemented interactive dataset verification system
 - Enhanced model evaluation with detailed metrics
 - Added automatic visualization generation during training
-- Improved documentation and code organization 
+- Improved documentation and code organization

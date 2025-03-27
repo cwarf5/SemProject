@@ -210,27 +210,39 @@ def process_frames():
             # Get frame from camera
             frame = picam2.capture_array('lores')
             
-            # Run object detection with Hailo
-            if frame.shape[:2] != (model_h, model_w):
-                resized_frame = cv2.resize(frame, (model_w, model_h))
-                results = hailo.run(resized_frame)
-            else:
-                results = hailo.run(frame)
-                
-            hailo_detections = extract_detections(results, main_size[0], main_size[1], class_names, score_threshold)
-            
-            # Run fire detection if model is available
+            # Run fire detection first
+            fire_detections = []
             if fire_model is not None:
                 fire_detections = detect_fire_in_frame(frame)
+                # If fire is detected, log it and add to detections immediately
+                if fire_detections:
+                    logging.warning(f"FIRE DETECTED with confidence {fire_detections[0][2]:.4f}")
+                    detections = fire_detections
+                    # Skip Hailo processing if fire is detected
+                    time.sleep(0.1)
+                    continue
+            
+            # If no fire detected, run object detection with Hailo
+            try:
+                if frame.shape[:2] != (model_h, model_w):
+                    resized_frame = cv2.resize(frame, (model_w, model_h))
+                    results = hailo.run(resized_frame)
+                else:
+                    results = hailo.run(frame)
+                    
+                hailo_detections = extract_detections(results, main_size[0], main_size[1], class_names, score_threshold)
                 
-                # Combine detections
+                # Combine detections (if fire was detected but we didn't skip Hailo)
                 all_detections = hailo_detections + fire_detections
                 
                 # Update global detections
                 detections = all_detections
-            else:
-                detections = hailo_detections
-                
+            except Exception as e:
+                logging.error(f"Error in Hailo detection: {e}")
+                # If Hailo fails but we have fire detections, still use those
+                if fire_detections:
+                    detections = fire_detections
+                    
         except Exception as e:
             logging.error(f"Error in processing frame: {e}")
             time.sleep(0.1)

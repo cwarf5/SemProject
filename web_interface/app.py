@@ -269,6 +269,10 @@ def process_frames():
     else:
         logging.warning("Hailo detection not available")
     
+    # Track Hailo errors to avoid flooding logs
+    hailo_consecutive_errors = 0
+    max_hailo_errors = 5  # After this many errors, disable Hailo
+    
     while True:
         try:
             # Get frame from camera
@@ -278,29 +282,39 @@ def process_frames():
             fire_detections = []
             try:
                 fire_detections = detect_fire_in_frame(frame)
+                if fire_detections:
+                    logging.warning(f"FIRE DETECTED with confidence {fire_detections[0][2]:.4f}")
+                    detections = fire_detections
+                    # Skip Hailo processing if fire is detected
+                    time.sleep(0.1)
+                    continue
             except Exception as e:
                 logging.error(f"Error in fire detection loop: {e}")
             
-            # If fire detected, prioritize it
-            if fire_detections:
-                detections = fire_detections
-                time.sleep(0.1)
-                continue
-                
-            # If no fire detected and Hailo is available, use it
+            # If no fire detected and Hailo is available and not too many errors, use it
             hailo_detections = []
-            if hailo is not None:
+            if hailo is not None and hailo_consecutive_errors < max_hailo_errors:
                 try:
                     if frame.shape[:2] != (model_h, model_w):
                         resized_frame = cv2.resize(frame, (model_w, model_h))
                     else:
                         resized_frame = frame
-                        
+                    
+                    # Ensure frame data is contiguous in memory
+                    if not resized_frame.flags['C_CONTIGUOUS']:
+                        resized_frame = np.ascontiguousarray(resized_frame)
+                    
                     results = hailo.run(resized_frame)
                     hailo_detections = extract_detections(results, main_size[0], main_size[1], 
                                                         class_names, score_threshold)
+                    # Reset error counter on success
+                    hailo_consecutive_errors = 0
                 except Exception as e:
-                    logging.error(f"Error in Hailo detection: {e}")
+                    hailo_consecutive_errors += 1
+                    if hailo_consecutive_errors < max_hailo_errors:
+                        logging.error(f"Error in Hailo detection ({hailo_consecutive_errors}/{max_hailo_errors}): {e}")
+                    elif hailo_consecutive_errors == max_hailo_errors:
+                        logging.error(f"Too many Hailo errors, disabling Hailo detection")
             
             # Update detections - prioritize fire if found
             if fire_detections:
@@ -308,8 +322,16 @@ def process_frames():
             elif hailo_detections:
                 detections = hailo_detections
             else:
-                # Clear detections if nothing found
-                detections = []
+                # If we have no detections but we're using the simulator, occasionally add a simulated detection
+                if simulate_fire and int(time.time()) % 10 == 0:
+                    h, w = frame.shape[:2]
+                    x0, y0 = int(w * 0.25), int(h * 0.25)
+                    x1, y1 = int(w * 0.75), int(h * 0.75)
+                    detections = [["Fire", (x0, y0, x1, y1), 0.85]]
+                    logging.warning("SIMULATED FIRE DETECTED")
+                else:
+                    # Clear detections if nothing found
+                    detections = []
                 
         except Exception as e:
             logging.error(f"Error in processing frame: {e}")

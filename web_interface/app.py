@@ -122,14 +122,17 @@ if TF_AVAILABLE:
 def preprocess_image(image):
     """Preprocess an image for the fire detection model."""
     try:
-        # Convert OpenCV BGR to RGB
+        # Convert to RGB if needed
         if len(image.shape) == 3 and image.shape[2] == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            # Handle grayscale or other formats
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         
-        # Resize to model input size
-        image_resized = cv2.resize(image, (224, 224))
+        # Resize to model input size (224x224 for MobileNetV2)
+        image_resized = cv2.resize(image_rgb, (224, 224))
         
-        # Normalize pixel values
+        # Normalize pixel values to 0-1
         image_normalized = image_resized.astype('float32') / 255.0
         
         # Add batch dimension
@@ -269,69 +272,85 @@ def process_frames():
     else:
         logging.warning("Hailo detection not available")
     
-    # Track Hailo errors to avoid flooding logs
-    hailo_consecutive_errors = 0
-    max_hailo_errors = 5  # After this many errors, disable Hailo
+    # Force testing on startup to verify fire detection pipeline
+    startup_test_done = False
     
     while True:
         try:
             # Get frame from camera
             frame = picam2.capture_array('lores')
             
+            # Run one-time test on startup to verify detection pipeline
+            if not startup_test_done and fire_model is not None:
+                try:
+                    # Create a small manually crafted fire image for testing
+                    test_img = np.zeros((320, 240, 3), dtype=np.uint8)
+                    test_img[80:160, 80:160, 0] = 0     # Blue channel
+                    test_img[80:160, 80:160, 1] = 0     # Green channel
+                    test_img[80:160, 80:160, 2] = 255   # Red channel (fire color)
+                    
+                    # Try to predict on this test image
+                    processed_img = preprocess_image(test_img)
+                    if processed_img is not None:
+                        pred = fire_model.predict(processed_img, verbose=0)[0][0]
+                        logging.warning(f"Fire detection test result: {pred:.4f}")
+                    
+                    startup_test_done = True
+                except Exception as e:
+                    logging.error(f"Fire detection test failed: {e}")
+                    startup_test_done = True
+            
             # Always try fire detection first
             fire_detections = []
             try:
                 fire_detections = detect_fire_in_frame(frame)
                 if fire_detections:
-                    logging.warning(f"FIRE DETECTED with confidence {fire_detections[0][2]:.4f}")
+                    # Log clearly with easily visible markers
+                    logging.warning(f"!!! FIRE DETECTED !!! Confidence: {fire_detections[0][2]:.4f}")
+                    # Update the global detections immediately with fire info
                     detections = fire_detections
-                    # Skip Hailo processing if fire is detected
                     time.sleep(0.1)
                     continue
             except Exception as e:
-                logging.error(f"Error in fire detection loop: {e}")
+                logging.error(f"Error in fire detection: {e}")
             
-            # If no fire detected and Hailo is available and not too many errors, use it
+            # If no fire detected and Hailo is available, use it
             hailo_detections = []
-            if hailo is not None and hailo_consecutive_errors < max_hailo_errors:
+            if hailo is not None:
                 try:
+                    # Make sure we have a clean RGB image of the correct size
                     if frame.shape[:2] != (model_h, model_w):
                         resized_frame = cv2.resize(frame, (model_w, model_h))
                     else:
-                        resized_frame = frame
+                        resized_frame = frame.copy()
                     
-                    # Ensure frame data is contiguous in memory
-                    if not resized_frame.flags['C_CONTIGUOUS']:
-                        resized_frame = np.ascontiguousarray(resized_frame)
+                    # Ensure correct format for Hailo
+                    if len(resized_frame.shape) != 3 or resized_frame.shape[2] != 3:
+                        resized_frame = cv2.cvtColor(resized_frame, cv2.COLOR_GRAY2RGB)
                     
+                    # Ensure contiguity
+                    resized_frame = np.ascontiguousarray(resized_frame)
+                    
+                    # Run detection with Hailo
                     results = hailo.run(resized_frame)
                     hailo_detections = extract_detections(results, main_size[0], main_size[1], 
-                                                        class_names, score_threshold)
-                    # Reset error counter on success
-                    hailo_consecutive_errors = 0
+                                                         class_names, score_threshold)
                 except Exception as e:
-                    hailo_consecutive_errors += 1
-                    if hailo_consecutive_errors < max_hailo_errors:
-                        logging.error(f"Error in Hailo detection ({hailo_consecutive_errors}/{max_hailo_errors}): {e}")
-                    elif hailo_consecutive_errors == max_hailo_errors:
-                        logging.error(f"Too many Hailo errors, disabling Hailo detection")
+                    logging.error(f"Error in Hailo detection: {e}")
             
-            # Update detections - prioritize fire if found
-            if fire_detections:
-                detections = fire_detections
-            elif hailo_detections:
+            # If Hailo provided detections, use them
+            if hailo_detections:
                 detections = hailo_detections
+            elif simulate_fire and int(time.time()) % 10 == 0:
+                # Simulate fire detection periodically if enabled
+                h, w = frame.shape[:2]
+                x0, y0 = int(w * 0.25), int(h * 0.25)
+                x1, y1 = int(w * 0.75), int(h * 0.75)
+                detections = [["Fire", (x0, y0, x1, y1), 0.85]]
+                logging.warning("SIMULATED FIRE DETECTED")
             else:
-                # If we have no detections but we're using the simulator, occasionally add a simulated detection
-                if simulate_fire and int(time.time()) % 10 == 0:
-                    h, w = frame.shape[:2]
-                    x0, y0 = int(w * 0.25), int(h * 0.25)
-                    x1, y1 = int(w * 0.75), int(h * 0.75)
-                    detections = [["Fire", (x0, y0, x1, y1), 0.85]]
-                    logging.warning("SIMULATED FIRE DETECTED")
-                else:
-                    # Clear detections if nothing found
-                    detections = []
+                # No detections found and simulation not active, clear detections
+                detections = []
                 
         except Exception as e:
             logging.error(f"Error in processing frame: {e}")

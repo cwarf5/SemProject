@@ -20,7 +20,7 @@ def setup_logging():
 
 logger = setup_logging()
 
-def train_yolo_model(data_yaml_path, epochs=50, imgsz=640, batch=8):
+def train_yolo_model(data_yaml_path, epochs=10, imgsz=640, batch=8):
     """
     Train a YOLOv8 model for fire detection.
     

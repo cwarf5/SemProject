@@ -273,7 +273,7 @@ def main():
     
     # Train the model
     logger.info("Training YOLOv8 model...")
-    model_path = train_yolo_model(data_yaml_path, epochs=30, imgsz=640, batch=8)
+    model_path = train_yolo_model(data_yaml_path, epochs=10, imgsz=640, batch=8)
     
     # If model_path is still None, try to find the model directly from the recent runs
     if model_path is None:

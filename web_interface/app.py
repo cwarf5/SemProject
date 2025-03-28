@@ -49,6 +49,16 @@ except ImportError:
     PICAMERA_AVAILABLE = False
     logging.warning("Picamera2 modules not available - running in simulation mode")
 
+# Check if we can actually initialize the camera (some imports might succeed but hardware fails)
+if PICAMERA_AVAILABLE:
+    try:
+        test_cam = Picamera2()
+        test_cam.close()
+        logging.info("Picamera2 hardware test successful")
+    except Exception as e:
+        logging.error(f"Picamera2 hardware test failed: {e}")
+        PICAMERA_AVAILABLE = False
+
 app = Flask(__name__)
 
 # Global variable to store detections

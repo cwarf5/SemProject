@@ -47,14 +47,32 @@ def train_yolo_model(data_yaml_path, epochs=50, imgsz=640, batch=8):
             name='fire_detection'
         )
         
-        # Get the path to the best model
-        best_model_path = f"runs/detect/fire_detection/weights/best.pt"
-        if os.path.exists(best_model_path):
-            logger.info(f"Training completed. Best model saved to {best_model_path}")
-            return best_model_path
-        else:
-            logger.error(f"Model training completed but best model not found at {best_model_path}")
-            return None
+        # Try different possible paths for the best model
+        possible_paths = [
+            "runs/detect/fire_detection/weights/best.pt",
+            f"runs/detect/fire_detection{epochs}/weights/best.pt",
+            f"runs/detect/fire_detection3/weights/best.pt"  # Specific path from your error
+        ]
+        
+        # Look for the best model in all possible locations
+        for model_path in possible_paths:
+            if os.path.exists(model_path):
+                logger.info(f"Training completed. Best model found at {model_path}")
+                return model_path
+                
+        # If we get here, check if any "runs/detect" directory exists with a weights subfolder
+        if os.path.exists("runs/detect"):
+            for run_dir in os.listdir("runs/detect"):
+                weights_dir = os.path.join("runs/detect", run_dir, "weights")
+                if os.path.exists(weights_dir):
+                    for file in os.listdir(weights_dir):
+                        if file == "best.pt":
+                            model_path = os.path.join("runs/detect", run_dir, "weights", file)
+                            logger.info(f"Training completed. Best model found at {model_path}")
+                            return model_path
+        
+        logger.error(f"Model training completed but best model not found in any expected location")
+        return None
             
     except Exception as e:
         logger.error(f"Error during YOLOv8 training: {e}")
@@ -256,6 +274,14 @@ def main():
     # Train the model
     logger.info("Training YOLOv8 model...")
     model_path = train_yolo_model(data_yaml_path, epochs=30, imgsz=640, batch=8)
+    
+    # If model_path is still None, try to find the model directly from the recent runs
+    if model_path is None:
+        # Check the specific path from the error message
+        specific_path = os.path.abspath("/home/pi/finalproject/SemProject/runs/detect/fire_detection3/weights/best.pt")
+        if os.path.exists(specific_path):
+            logger.info(f"Found model at path from error message: {specific_path}")
+            model_path = specific_path
     
     if model_path and os.path.exists(model_path):
         # Test the model

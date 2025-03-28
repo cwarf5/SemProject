@@ -276,15 +276,35 @@ def draw_objects(request):
 # Initialize camera based on what's available
 if PICAMERA_AVAILABLE:
     try:
-        # Create Picamera2 instance and configure streams
+        # Create Picamera2 instance with more careful initialization
         picam2 = Picamera2()
+        
+        # Get available camera configurations
+        camera_configs = picam2.camera_properties
+        logging.info(f"Camera properties: {camera_configs}")
+        
+        # Set up camera configuration with more conservative settings
         lores_size = (320, 240)  # Lo-res stream size for detection
+        
+        # Use more conservative main size if high resolution is causing issues
+        conservative_main = {'size': (640, 480), 'format': 'XRGB8888'}
         main = {'size': main_size, 'format': 'XRGB8888'}
         lores = {'size': lores_size, 'format': 'RGB888'}
-        controls = {'FrameRate': frame_rate}
-
-        video_config = picam2.create_preview_configuration(main, lores=lores, controls=controls)
+        
+        # Try to create configurations - first try with the requested size
+        try:
+            video_config = picam2.create_preview_configuration(main, lores=lores)
+            logging.info("Using high resolution camera configuration")
+        except Exception as e:
+            logging.warning(f"Failed to create high resolution config: {e}, trying conservative settings")
+            # If that fails, try with more conservative settings
+            video_config = picam2.create_preview_configuration(conservative_main, lores=lores)
+            logging.info("Using conservative camera configuration")
+            
+        # Apply the configuration
         picam2.configure(video_config)
+        
+        # Set up the callback for drawing objects
         picam2.pre_callback = draw_objects
         
         logging.info("Picamera2 configured successfully")
